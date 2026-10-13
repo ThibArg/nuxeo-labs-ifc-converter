@@ -1,6 +1,11 @@
 nuxeo-labs-ifc-converter
 ========================
 
+> [!IMPORTANT]
+> This repository has moved to
+> [nuxeo-sandbox/nuxeo-labs-ifc-converter](https://github.com/nuxeo-sandbox/nuxeo-labs-ifc-converter)
+> and is archived. Please use the new location.
+
 ### TL;DR
 
 * Provides a Docker container that converts (via a HTTP service) an `IFC` file to `GLB`, `OBJ`, `SVG`
