@@ -21,6 +21,20 @@ The image sources live in `ifc-converter/`, which is also the Docker build conte
 folder next to their `docker-compose.yml`. `samples/` and `README.md` stay at the repository root and are
 not part of the image.
 
+## Repo facts
+
+- No CI, no test suite, no build step for the repository itself. The only verification is the "Build, run,
+  verify" procedure below; don't look for a Makefile, a workflow or a package manifest.
+- `AGENTS.md` is committed on purpose here and must **not** be added to `.gitignore`.
+- Work happens directly on `master`, and `README.md` still carries a work-in-progress banner. Don't remove
+  that banner on your own initiative.
+- Runtime knobs, read once at import (`app.py` top), so changing one needs a container restart:
+  `MAX_UPLOAD_MB=500`, `CONVERT_TIMEOUT_S=150`, `MAX_CONCURRENT=2`, `IFC_THREADS=4`.
+- **No `LICENSE` file, on purpose**: the Apache-2.0 licensing is stated in the "Licenses" section of
+  `README.md` and at the top of `THIRD-PARTY-NOTICES.md`. Don't add one. Don't turn those pointers into
+  relative links either: `THIRD-PARTY-NOTICES.md` is copied into the image (`Dockerfile`) and ships alone
+  with the `ifc-converter/` folder, where `README.md` and `samples/` do not exist.
+
 ## Hard rules
 
 - **Docker**: ask the user before building, rebuilding or pulling an image (a build downloads about 1 GB and
@@ -65,13 +79,31 @@ not part of the image.
   with the most objects.
 - **Headless rendering**: EGL + Mesa llvmpipe (CPU), no X server, no GPU. `VTK_DEFAULT_OPENGL_WINDOW` skips
   the X11 probe; `HOME` and `MPLCONFIGDIR` point to `/tmp` because the filesystem is read-only.
-- **Comparing outputs**: with `-j` > 1, IfcConvert's output order changes from run to run. Compare files
-  produced with `-j 1` only.
+- **Comparing outputs**: IfcConvert's `-j` comes from `IFC_THREADS`, and with more than one thread its
+  output order changes from run to run. Run the container with `-e IFC_THREADS=1` to get byte-identical
+  files between two runs; any other value makes a checksum comparison meaningless.
+- **Timeout accounting**: `CONVERT_TIMEOUT_S` is a deadline armed *after* the request acquires the
+  concurrency semaphore (`convert()` in `app.py`), not when it arrives. A request queued behind
+  `MAX_CONCURRENT` others can therefore take much longer than `CONVERT_TIMEOUT_S` wall-clock, which is
+  why the client timeout has to be the larger one.
 
 ## Build, run, verify
 
 There is no automated test suite: this procedure is the test. Build only after the user agreed, and use the
 image tag the user gives you (`ifc-converter` below is an example).
+
+Run `docker ps` first: another project's compose stack may already be running an `ifc-converter` container.
+Never stop or reuse a container you did not start, and pick a port nothing else uses.
+
+**A change limited to `app.py` or `render.py` needs no rebuild**: mount the files over `/app` in an
+existing image and restart the container. Use this for every Python iteration and only rebuild when the
+`Dockerfile` changes.
+
+```bash
+docker run --rm -d --name ifc-converter-check -p 127.0.0.1:18080:8080 \
+  -v "$PWD/ifc-converter/app.py:/app/app.py:ro" -v "$PWD/ifc-converter/render.py:/app/render.py:ro" \
+  ifc-converter:latest
+```
 
 Build, from the repository root — the build context is `ifc-converter/`, not the root (on Apple silicon, the
 amd64 build is emulated and about 3× slower):
@@ -81,7 +113,8 @@ docker build -t <image> ./ifc-converter
 docker build --platform linux/amd64 -t <image-for-amd64> ./ifc-converter
 ```
 
-Run a temporary container, published on localhost only:
+Run a temporary container, published on localhost only. `/health` returns 503 when IfcConvert is not
+runnable, so check for `"status":"ok"`, not just for a reply:
 
 ```bash
 IMAGE=ifc-converter   # the tag confirmed by the user
@@ -112,6 +145,17 @@ Errors (each must print 400):
 curl -s -o /dev/null -w '%{http_code}\n' -X POST --data-binary @/dev/null "http://127.0.0.1:18080/convert?format=glb"
 printf 'hello' | curl -s -o /dev/null -w '%{http_code}\n' --data-binary @- "http://127.0.0.1:18080/convert?format=glb"
 curl -s -o /dev/null -w '%{http_code}\n' --data-binary @samples/Duplex_A_20110907.ifc "http://127.0.0.1:18080/convert?format=pdf"
+curl -s -o /dev/null -w '%{http_code}\n' --data-binary @samples/Duplex_A_20110907.ifc "http://127.0.0.1:18080/convert?format=png&size=10"
+```
+
+Production shape: in `docker-compose.yml` the service runs `read_only: true` with a `/tmp` volume and all
+capabilities dropped, which a plain `docker run` does not exercise. Any code writing outside `/tmp` passes
+the tests above and fails in production, so re-run at least one conversion per format this way:
+
+```bash
+docker run --rm -d --name ifc-converter-ro -p 127.0.0.1:18081:8080 \
+  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true "$IMAGE"
+curl -s http://127.0.0.1:18081/health
 ```
 
 No CGAL in the image (both counts must be 0; the IfcConvert binary itself only mentions CGAL in its help text):
@@ -155,8 +199,20 @@ version shown in `README.md`.
 
 - The Nuxeo side (mime types, command line, converters, automation, UI) is configured in Nuxeo, not in this
   repository. `README.md` documents it as a ready-to-copy example; no Nuxeo code or bundle is built here.
-  Keep that example in sync with the service API when it changes: it relies on `CommandLineConverter`
-  (`#{sourceFilePath}` / `#{targetFilePath}`), on `curl -f` for error reporting, and on the timeout chain
-  `CONVERT_TIMEOUT_S` < `curl --max-time` < the command `<timeout>` < the transaction time to live.
+  Keep that example in sync with the service API, and don't simplify away the parts that look redundant.
+  The semantics below are verified against the LTS 2025 sources, they are the reason each part is there:
+  - `enabled="true"`: the default is `false` and the command is silently ignored.
+  - `-o #{outDirPath}/nxblob-preview.<ext>`: without `-o`, `CommandLineConverter` lists `#{outDirPath}` and
+    turns **every** file it finds there into a result blob. The `nxblob-` prefix makes Nuxeo rename the
+    rendition to the source base name plus the *first extension registered for the destination mime type*
+    (`ConversionServiceImpl.updateResultBlobFileName`), which is why the mime type contributions are
+    required for correct naming.
+  - `--fail-with-body` keeps the service's plain-text error (`-f` discards it); `-H "Expect:"` avoids
+    curl's 100-continue handshake on large bodies; the IFC goes out as `--data-binary @#{sourceFilePath}`.
+  - Timeout chain, each step longer than the previous one: `CONVERT_TIMEOUT_S` (150) < `curl --max-time`
+    (170) < the command `<timeout>` (180s) < the transaction timeout (`nuxeo.db.transactiontimeout`, 300s
+    by default), so the service answers 504 before the client gives up. `<timeout>` is parsed as a
+    `Duration`, so its unit is mandatory (`180s`, not `180`), and Nuxeo enforces
+    `min(<timeout>, remaining transaction TTL)` by prefixing the command with `timeout -s 9`.
 - Publishing images to a registry: distributing the image brings license obligations
   (see `THIRD-PARTY-NOTICES.md`). This repository only ships source.

@@ -1,8 +1,10 @@
 # Third-party notices
 
 This repository contains only:
-- Hyland's own files (Dockerfile, `app.py`, `render.py`, documentation), under Apache-2.0 (see `LICENSE`)
-- two sample IFC files under CC BY 4.0 (see `samples/README.md`)
+- Hyland's own files (Dockerfile, `app.py`, `render.py`, documentation), under the Apache License 2.0
+  (https://www.apache.org/licenses/LICENSE-2.0). There is no `LICENSE` file on purpose: the licensing is
+  stated in the "Licenses" section of the repository's `README.md` and in this document.
+- two sample IFC files under CC BY 4.0, credited in the `samples` folder of the repository
 
 **No third-party software is included in this repository.** When you build the image, Docker downloads
 the components below from their official sources. Each one stays under its own license.

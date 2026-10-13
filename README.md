@@ -1,13 +1,6 @@
 nuxeo-labs-ifc-converter
 ========================
 
-> [!CAUTION]
-> This is **Work in Progress**. ⚠️ Do not use as is for now ⚠️.
->
-> Once ready it will be forked to `nuxeo-sandbox`and archived here.
-
-<hr>
-
 ### TL;DR
 
 * Provides a Docker container that converts (via a HTTP service) an `IFC` file to `GLB`, `OBJ`, `SVG`
@@ -31,7 +24,7 @@ nuxeo-labs-ifc-converter
       * The first build downloads about 1 GB and the image is about 1.4 GB
   * Usage: Copy the misc. XML declarations and use `Blob.RunConverter`.
 
-* **Security**. In current version, the service has no authentication and processes files uploaded by users:
+* **Security**. In current version, the service has no authentication and it processes files uploaded by users:
   * Never give it a `ports:` mapping in production
   * Only the containers of the compose network must reach it.
 
@@ -144,7 +137,7 @@ Errors come back as plain text explaining the problem (without `-f`, curl writes
 | 400 | Empty body, not an IFC file (no `ISO-10303-21` header; ifcXML and ifcZIP are not supported), unknown `format`/`view`, invalid `size` |
 | 413 | File larger than `MAX_UPLOAD_MB` |
 | 500 | The conversion failed or produced nothing (e.g. no geometry); the body has the end of the tool's log |
-| 504 | The conversion took longer than `CONVERT_TIMEOUT_S` (the process is killed) |
+| 504 | The conversion took longer than `CONVERT_TIMEOUT_S` (the process is killed). The caller must allow more time than `CONVERT_TIMEOUT_S`, otherwise it gives up before this answer is sent |
 
 
 ## Usage with Nuxeo
@@ -232,8 +225,8 @@ The `ifc-converter` HTTP servioce is not multipart, so everything must be passed
   <!-- ifc-to-png requires to pass the view (3d or plan) and the size (>= 64, <= 4096) -->
   <command name="ifc-to-png" enabled="true">
     <commandLine>curl</commandLine>
-    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.png --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=png&amp;view=#{view}&amp;size=#{size}"</parameterString>
-    <timeout>150s</timeout>
+    <parameterString>-sS --fail-with-body --max-time 170 -H "Expect:" -o #{outDirPath}/nxblob-preview.png --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=png&amp;view=#{view}&amp;size=#{size}"</parameterString>
+    <timeout>180s</timeout>
     <installationDirective>
       Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
     </installationDirective>
@@ -241,8 +234,8 @@ The `ifc-converter` HTTP servioce is not multipart, so everything must be passed
 
   <command name="ifc-to-svg" enabled="true">
     <commandLine>curl</commandLine>
-    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.svg --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=svg"</parameterString>
-    <timeout>150s</timeout>
+    <parameterString>-sS --fail-with-body --max-time 170 -H "Expect:" -o #{outDirPath}/nxblob-preview.svg --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=svg"</parameterString>
+    <timeout>180s</timeout>
     <installationDirective>
       Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
     </installationDirective>
@@ -250,8 +243,8 @@ The `ifc-converter` HTTP servioce is not multipart, so everything must be passed
 
   <command name="ifc-to-glb" enabled="true">
     <commandLine>curl</commandLine>
-    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.glb --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=glb"</parameterString>
-    <timeout>150s</timeout>
+    <parameterString>-sS --fail-with-body --max-time 170 -H "Expect:" -o #{outDirPath}/nxblob-preview.glb --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=glb"</parameterString>
+    <timeout>180s</timeout>
     <installationDirective>
       Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
     </installationDirective>
@@ -259,8 +252,8 @@ The `ifc-converter` HTTP servioce is not multipart, so everything must be passed
 
   <command name="ifc-to-obj" enabled="true">
     <commandLine>curl</commandLine>
-    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.obj --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=obj"</parameterString>
-    <timeout>150s</timeout>
+    <parameterString>-sS --fail-with-body --max-time 170 -H "Expect:" -o #{outDirPath}/nxblob-preview.obj --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=obj"</parameterString>
+    <timeout>180s</timeout>
     <installationDirective>
       Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
     </installationDirective>
@@ -268,8 +261,8 @@ The `ifc-converter` HTTP servioce is not multipart, so everything must be passed
 
   <command name="ifc-to-objzip" enabled="true">
     <commandLine>curl</commandLine>
-    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.zip --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=objzip"</parameterString>
-    <timeout>150s</timeout>
+    <parameterString>-sS --fail-with-body --max-time 170 -H "Expect:" -o #{outDirPath}/nxblob-preview.zip --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=objzip"</parameterString>
+    <timeout>180s</timeout>
     <installationDirective>
       Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
     </installationDirective>
@@ -280,8 +273,31 @@ The `ifc-converter` HTTP servioce is not multipart, so everything must be passed
 Points that matter:
 
 - `enabled="true"` is **required**: the default is `false` and the command would be silently ignored.
-- `-o #{outDirPath}/nxblob-preview...etc..` is **required** too: Without it, the CommandLineConverter
-   lists outDirPath, turning every file found there into a result blob.
+- `-o #{outDirPath}/nxblob-preview...etc..` is **required** too: Without it, the `CommandLineConverter`
+   lists the content of `outDirPath`, turning every file found there into a result blob.
+- **The timeouts form a chain, keep them in this order**:
+
+  | Step | Value | Set in |
+  |---|---|---|
+  | The service gives up and answers `504` | `CONVERT_TIMEOUT_S` = 150s | `docker-compose.yml` (default) |
+  | `curl` gives up | `--max-time 170` | the `<parameterString>` above |
+  | Nuxeo kills `curl` | `<timeout>180s</timeout>` | the `<command>` above |
+  | The transaction expires | 300s | `nuxeo.db.transactiontimeout` |
+
+  Each step must be longer than the one above it, so that a conversion that takes too long comes back as the
+  service's plain-text `504` instead of `curl` being killed first and leaving nothing to report.
+
+> [!IMPORTANT]
+> Two traps when you change these numbers:
+> * `<timeout>` is parsed as a duration, so the unit is **mandatory**: `180s`, not `180`.
+> * Nuxeo applies `min(<timeout>, time left in the transaction)`. If the transaction is already half spent
+>   when the converter runs, the 180s above is silently shortened.
+
+> [!NOTE]
+> Under load the chain can still break: `CONVERT_TIMEOUT_S` only starts counting once the request gets one of
+> the `MAX_CONCURRENT` slots, not when it arrives. A request waiting behind others can therefore exceed
+> `--max-time` before the service even begins converting. If that happens, raise `MAX_CONCURRENT` (and the
+> container's CPU/memory) rather than just stretching the timeouts.
 
 ### 3. Register the `ifc-to...` Converters
 
@@ -371,8 +387,8 @@ var zip = Blob.RunConverter(ifcBlob, {'converter': 'ifc-to-objzip'});
 | Variable | Default | Meaning |
 |---|---|---|
 | `MAX_UPLOAD_MB` | 500 | Maximum IFC size |
-| `CONVERT_TIMEOUT_S` | 150 | Maximum time for one conversion (all steps) |
-| `MAX_CONCURRENT` | 2 | Conversions running at the same time; extra requests wait their turn |
+| `CONVERT_TIMEOUT_S` | 150 | Maximum time for one conversion (all steps). Whoever calls the service must allow more time than this, see the timeout chain in [Usage with Nuxeo](#usage-with-nuxeo) |
+| `MAX_CONCURRENT` | 2 | Conversions running at the same time; extra requests wait their turn. `CONVERT_TIMEOUT_S` starts only once a request gets a slot, so waiting time is not counted in it |
 | `IFC_THREADS` | 4 | Threads used by IfcConvert for each conversion |
 
 Each request is logged on one line: `convert format=png view=3d in=92542B status=200 time=0.65s`
