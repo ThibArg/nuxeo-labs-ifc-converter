@@ -8,69 +8,39 @@ nuxeo-labs-ifc-converter
 
 <hr>
 
-## TL;DR
+### TL;DR
 
-**What it is.** A small HTTP service converting an **IFC** file (BIM/CAD, IFC-SPF only) to **GLB**, **OBJ**,
-**SVG** (floor plan) or **PNG** (preview). It ships as a Docker image **you build yourself** from this
-repository, and runs in its own container **next to** Nuxeo. The Nuxeo image is never modified.
+* Provides a Docker container that converts (via a HTTP service) an `IFC` file to `GLB`, `OBJ`, `SVG`
+  (floor plan), or `PNG` (preview).
 
-**How Nuxeo uses it.** Nuxeo calls the service with `curl`, from a `CommandLineConverter` contribution, and
-gets the converted file back:
+> [!IMPORTANT]
+> The converter supports only BIM/CAD and IFC-SPF
 
-```bash
-curl -sf --data-binary @model.ifc "http://ifc-converter:8080/convert?format=png" -o preview.png
-```
+* You build yourself a Docker image ("ifc-converter") and deploy a container alongside Nuxeo (The Nuxeo
+  image is never modified.)
 
-From Automation, `Blob.RunConverter` then returns the rendition you need (thumbnail, source for a 3D viewer,
-floor plan…). The ready-to-copy XML contributions are in [Usage from Nuxeo](#usage-from-nuxeo).
+* Nuxeo calls the service using `curl` from a `CommandLineConverter` contribution (Failures are returned
+  as plain text with a meaningful HTTP status code) and `Blob.RunConverter` provides the desired rendition.
 
-**The API** is one endpoint, `POST /convert?format=…`, with the IFC as the **raw request body**
-(plus `GET /health`):
+* [Deployment](#build-deploy)/[Usage](#usage-with-nuxeo):
 
-| `format` | What you get | Typical use |
-|---|---|---|
-| `glb` | Binary glTF, one file, colors included | Web 3D viewer (recommended: ~20× smaller than OBJ) |
-| `obj` / `objzip` | The `.obj` alone, or a zip with `.obj` + `.mtl` | Pipelines that require OBJ |
-| `svg` | Vector floor plans, one `<g>` layer per storey | Printable / zoomable plans |
-| `png` | `view=3d` isometric (default) or `view=plan`; `size` 64–4096, default 1024 | Thumbnails, previews |
+  * Deployment:
+    * Copy the `ifc-converter` folder next to your `docker-compose.yml`
+    * Add the `ifc-converter` service to your `docker-compose.yml`
+    * Then either deploy the whole stack or just this container if the rest is already running)
+      * The first build downloads about 1 GB and the image is about 1.4 GB
+  * Usage: Copy the misc. XML declarations and use `Blob.RunConverter`.
 
-Failures come back as **plain text** with a meaningful status (`400` bad input, `413` too large, `500`
-conversion failed, `504` timeout), so `curl -f` fails and Nuxeo reports the error instead of storing it.
+* **Security**. In current version, the service has no authentication and processes files uploaded by users:
+  * Never give it a `ports:` mapping in production
+  * Only the containers of the compose network must reach it.
 
-**Deploying it** takes three steps: copy the `ifc-converter` folder next to your `docker-compose.yml`, add
-the `ifc-converter` service there (build context `./ifc-converter`, `expose: 8080`, **no** `ports:`), then
-`docker compose up -d --build ifc-converter`. Check it with
-`docker compose exec nuxeo curl -s http://ifc-converter:8080/health`. The first build downloads about 1 GB
-and the image is about 1.4 GB (VTK is the biggest part).
+* Building the image and running it inside your organization creates no licensing obligation: **do not
+  redistribute the built image**.
 
-**What is inside.** Debian 13 (IfcOpenShell 0.9 needs glibc 2.38; Oracle Linux 9, the Nuxeo base image, has
-2.34), IfcConvert for the geometry, PyVista/VTK for the headless 3D render (Mesa llvmpipe, CPU only, no GPU
-and no X server), `rsvg-convert` for SVG → PNG, FastAPI/uvicorn for the HTTP layer. Four environment
-variables tune it: `MAX_UPLOAD_MB` (500), `CONVERT_TIMEOUT_S` (150), `MAX_CONCURRENT` (2), `IFC_THREADS` (4).
+## Build-Deploy
 
-**Security.** The service has **no authentication** and processes files uploaded by users: never give it a
-`ports:` mapping in production, only the containers of the compose network must reach it. It runs as a
-non-root user, on a read-only filesystem with a `/tmp` volume, every tool in a killable subprocess, with an
-upload size limit and a concurrency limit. Logs hold metadata only, never file content.
-
-**Licensing, in one line:** building the image and running it **inside your organization creates no
-obligation** (nothing is AGPL, and the 3 GPL CGAL plugins shipped by IfcConvert are deleted at build time);
-**do not redistribute the built image** — share this repository instead. Details in
-[Licenses](#licenses) and [THIRD-PARTY-NOTICES.md](ifc-converter/THIRD-PARTY-NOTICES.md).
-
-**Known limits.** Only IFC-SPF is accepted (no ifcXML, no ifcZIP). The floor plan only makes sense for
-buildings with storeys: for infrastructure or a single piece of equipment, use the 3D PNG. GLB is Y-up (glTF
-standard), OBJ keeps IFC's Z-up.
-
-## Usage
-
-* Add the `ifc-converter` service to your docker-compose (so it creates the Docker image and spreads a container from it, on the same VM as Nuxeo for direct http access)
-* Then, contribute XML extension(s) to the CommandLineConverter service.
-* From Automation, use `Blob.RunConverter` to get the rendition you need.
-
-### Build/Deploy the `ifc-converter` Docker Image
-
-* **Create/Deploy**
+### 1. Setup for Docker Compose
 
   * Copy the whole `ifc-converter` folder to your docker-compose folder, next to your `docker-compose.yml`
     (for example, clone the repository into that folder).
@@ -116,7 +86,7 @@ volumes:
    `docker compose up nuxeo` also starts it. Don't use `condition: service_healthy`: Nuxeo would not start
    when the converter is unhealthy, while it only needs it to convert IFC files.
 
-* **Build, Start**
+### 2. Build/Start
 
 If your Nuxeo/Mongo/etc. containers were already running:
 
@@ -127,7 +97,7 @@ docker compose up -d --build ifc-converter
 > [!NOTE]
 > The first build downloads about 1 GB (VTK is the biggest part); the image is about 1.4 GB.
 
-* **Check** that Nuxeo can reach it:
+**Check Nuxeo can reach it** (here, the service name `nuxeo`)):
 
 ```bash
 docker compose exec nuxeo curl -s http://ifc-converter:8080/health
@@ -135,7 +105,7 @@ docker compose exec nuxeo curl -s http://ifc-converter:8080/health
 
 Expected: `{"status":"ok","ifcconvert":"IfcOpenShell IfcConvert 0.9.0alpha0-8c614fa"}`
 
-#### API
+### 3. API
 
 `POST /convert?format=<format>[&view=3d|plan][&size=1024]` with the IFC file as the **raw request body**.
 
@@ -149,7 +119,7 @@ Expected: `{"status":"ok","ifcconvert":"IfcOpenShell IfcConvert 0.9.0alpha0-8c61
 
 `GET /health` returns `{"status":"ok", ...}` (used by the Docker healthcheck).
 
-**`curl` examples (from the Nuxeo container)**
+### 4. `curl` examples (from the Nuxeo container)**
 
 Use `-f` so curl exits with an error code (22) when the conversion fails.
 
@@ -165,7 +135,7 @@ curl -sf --data-binary @model.ifc "http://ifc-converter:8080/convert?format=objz
 curl -sf --data-binary @model.ifc "http://ifc-converter:8080/convert?format=svg" -o plan.svg
 ```
 
-#### Errors
+### 5. Errors
 
 Errors come back as plain text explaining the problem (without `-f`, curl writes it to the output file).
 
@@ -177,27 +147,35 @@ Errors come back as plain text explaining the problem (without `-f`, curl writes
 | 504 | The conversion took longer than `CONVERT_TIMEOUT_S` (the process is killed) |
 
 
-### Usage from Nuxeo
+## Usage with Nuxeo
 
-Nuxeo needs three contributions: the `.ifc` mime type (Nuxeo doesn't know it), one `curl` command line, and
-one converter per format. Everything below goes in your own Studio project or plugin, nothing is installed in
-Nuxeo by this repository.
+Nuxeo needs contributions to three services:
 
-`curl` is already in the Nuxeo image, no extra installation is needed. Check it with
-`docker compose exec nuxeo curl --version`.
+* The Mime-Type service
+* The CommandLine service
+* And the converter service
 
-#### 1. Register the mime types
+In all cases, create the XML and paste the contributions below as-is. You can - of course - centralize everying
+in a single contribution if you prefer
+
+> [!TIP]
+> Conversions are cached by Nuxeo on the blob plus the parameters: converting the same IFC twice with the same
+> parameters runs `curl` only once (as long as the file is still in the cache).
+
+
+### 1. Register the mime types
 
 Nuxeo has no mime type for `.ifc`, `.glb` or `.obj`. Without this contribution an uploaded IFC is stored as
 `text/plain` (IFC is a text format) and no converter is ever selected.
 
-There is no IANA mime type for IFC; `model/ifc` below is a de facto choice. Any value works as long as the
-same one is used in the `<sourceMimeType>` of the converters.
+> [!IMPORTANT]
+> There is no IANA mime type for IFC; `model/ifc` below is a de facto choice. Any value works as long as the
+> same one is used in the `<sourceMimeType>` of the converters.
 
 ```xml
 <extension target="org.nuxeo.ecm.platform.mimetype.service.MimetypeRegistryService" point="mimetype">
 
-  <mimetype normalized="model/ifc" binary="false" iconPath="application.png">
+  <mimetype normalized="model/ifc" binary="false" iconPath="file.png">
     <mimetypes>
       <mimetype>model/ifc</mimetype>
       <mimetype>application/x-ifc</mimetype>
@@ -208,16 +186,17 @@ same one is used in the `<sourceMimeType>` of the converters.
     </extensions>
   </mimetype>
 
-  <mimetype normalized="model/gltf-binary" binary="true" iconPath="application.png">
+  <mimetype normalized="model/gltf-binary" binary="true" iconPath="file.png">
     <mimetypes>
       <mimetype>model/gltf-binary</mimetype>
+      <mimetype>model/gltf_binary</mimetype>
     </mimetypes>
     <extensions>
       <extension>glb</extension>
     </extensions>
   </mimetype>
 
-  <mimetype normalized="model/obj" binary="false" iconPath="application.png">
+  <mimetype normalized="model/obj" binary="false" iconPath="file.png">
     <mimetypes>
       <mimetype>model/obj</mimetype>
     </mimetypes>
@@ -236,133 +215,158 @@ same one is used in the `<sourceMimeType>` of the converters.
 </extension>
 ```
 
-`image/png`, `image/svg+xml` and `application/zip` are already registered by Nuxeo.
+### 2. Register the misc. `ifc-to*` command lines
 
-#### 2. Register the `curl` command line
+The `ifc-converter` HTTP servioce is not multipart, so everything must be passed in one shot as query parameters (can't use `-F` switch of `curl`for example). It makes it a bit more comple for endpoints which don't need a `view` and a `size`. This is why we register one command line per output.
 
-One command is enough for every format: the query string is passed as a parameter. The `<require>` must be a
-direct child of your `<component>`, it makes sure the default command line contributions are loaded first.
+> [!TIP]
+> Prefixing the output with `nxblob-...` makes Nuxeo name the file with the original file + the correct extension. No need to pass a `destFileName` parameter 
+
+> [!IMPORTANT]
+> Of course, you can tune these as you wish. For example, the url is hard coded, you can adapt it or even pass it as a parameter (like `#{serviceUrl}`))
 
 ```xml
-<require>org.nuxeo.ecm.platform.commandline.executor.service.defaultContrib</require>
-
 <extension target="org.nuxeo.ecm.platform.commandline.executor.service.CommandLineExecutorComponent"
            point="command">
-
-  <command name="ifcConverter" enabled="true">
+  
+  <!-- ifc-to-png requires to pass the view (3d or plan) and the size (>= 64, <= 4096) -->
+  <command name="ifc-to-png" enabled="true">
     <commandLine>curl</commandLine>
-    <parameterString>-sf --max-time 170 -o #{targetFilePath} --data-binary @#{sourceFilePath} #{serviceUrl}/convert?#{query}</parameterString>
-    <testParameterString>--version</testParameterString>
-    <timeout>180s</timeout>
-    <installationDirective>curl must be available in the Nuxeo container, and the ifc-converter container must be reachable.</installationDirective>
+    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.png --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=png&amp;view=#{view}&amp;size=#{size}"</parameterString>
+    <timeout>150s</timeout>
+    <installationDirective>
+      Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
+    </installationDirective>
   </command>
 
+  <command name="ifc-to-svg" enabled="true">
+    <commandLine>curl</commandLine>
+    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.svg --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=svg"</parameterString>
+    <timeout>150s</timeout>
+    <installationDirective>
+      Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
+    </installationDirective>
+  </command>
+
+  <command name="ifc-to-glb" enabled="true">
+    <commandLine>curl</commandLine>
+    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.glb --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=glb"</parameterString>
+    <timeout>150s</timeout>
+    <installationDirective>
+      Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
+    </installationDirective>
+  </command>
+
+  <command name="ifc-to-obj" enabled="true">
+    <commandLine>curl</commandLine>
+    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.obj --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=obj"</parameterString>
+    <timeout>150s</timeout>
+    <installationDirective>
+      Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
+    </installationDirective>
+  </command>
+
+  <command name="ifc-to-objzip" enabled="true">
+    <commandLine>curl</commandLine>
+    <parameterString>-sS --fail-with-body --max-time 140 -H "Expect:" -o #{outDirPath}/nxblob-preview.zip --data-binary @#{sourceFilePath} "http://ifc-converter:8080/convert?format=objzip"</parameterString>
+    <timeout>150s</timeout>
+    <installationDirective>
+      Start the "ifc-converter" service and make sure it is reachable at http://ifc-converter:8080/ from the Nuxeo container.
+    </installationDirective>
+  </command>
 </extension>
 ```
 
 Points that matter:
 
 - `enabled="true"` is **required**: the default is `false` and the command would be silently ignored.
-- `#{sourceFilePath}` (the uploaded IFC, written to a temp file) and `#{targetFilePath}` (the file to produce)
-  are provided by `CommandLineConverter`. `#{serviceUrl}` and `#{query}` come from the converters below.
-- `-f` is **required**: without it `curl` exits 0 on an HTTP 400/500 and Nuxeo would store the plain-text
-  error message as if it were the converted file. With `-f`, `curl` exits 22, the conversion fails and the
-  service's error message ends up in the `ConversionException`.
-- `-o #{targetFilePath}` is **required** too: the converter collects the files written in the output
-  directory, it ignores the command's standard output.
-- Nuxeo runs the command as a real process, not through a shell, so `?`, `&` and `=` are never interpreted.
-  In the XML, `&` must still be written `&amp;` (see the converters below).
-- **Timeouts must increase along the chain**: `CONVERT_TIMEOUT_S` (150 s, in the container) <
-  `curl --max-time` (170 s) < the command `<timeout>` (180 s) < the transaction time to live
-  (`nuxeo.db.transactiontimeout`, 300 s by default). Nuxeo caps the command at the *remaining* transaction
-  time, so a conversion started late in a long transaction can still be killed (exit code 137). Big models
-  are better converted in an asynchronous listener or a worker.
+- `-o #{outDirPath}/nxblob-preview...etc..` is **required** too: Without it, the CommandLineConverter
+   lists outDirPath, turning every file found there into a result blob.
 
-#### 3. Register one converter per format
+### 3. Register the `ifc-to...` Converters
+
+(A reminder that the mimetypes must have been contributed)
 
 ```xml
-<extension target="org.nuxeo.ecm.core.convert.service.ConversionServiceImpl" point="converter">
+<extension target="org.nuxeo.ecm.core.convert.service.ConversionServiceImpl"
+           point="converter">
 
-  <converter name="ifc2glb" class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
-    <sourceMimeType>model/ifc</sourceMimeType>
-    <destinationMimeType>model/gltf-binary</destinationMimeType>
-    <parameters>
-      <parameter name="CommandLineName">ifcConverter</parameter>
-      <parameter name="serviceUrl">http://ifc-converter:8080</parameter>
-      <parameter name="query">format=glb</parameter>
-    </parameters>
-  </converter>
-
-  <converter name="ifc2png" class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
+  <!-- ifc-to-png requires to pass the view (3d or plan) and the size (>= 64, <= 4096) parameters -->
+  <converter name="ifc-to-png"
+             class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
     <sourceMimeType>model/ifc</sourceMimeType>
     <destinationMimeType>image/png</destinationMimeType>
     <parameters>
-      <parameter name="CommandLineName">ifcConverter</parameter>
-      <parameter name="serviceUrl">http://ifc-converter:8080</parameter>
-      <parameter name="query">format=png&amp;view=3d&amp;size=1024</parameter>
+      <parameter name="CommandLineName">ifc-to-png</parameter>
     </parameters>
   </converter>
-
-  <converter name="ifc2plan" class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
-    <sourceMimeType>model/ifc</sourceMimeType>
-    <destinationMimeType>image/png</destinationMimeType>
-    <parameters>
-      <parameter name="CommandLineName">ifcConverter</parameter>
-      <parameter name="serviceUrl">http://ifc-converter:8080</parameter>
-      <parameter name="query">format=png&amp;view=plan&amp;size=2048</parameter>
-    </parameters>
-  </converter>
-
-  <converter name="ifc2svg" class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
+  
+  <converter name="ifc-to-svg"
+             class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
     <sourceMimeType>model/ifc</sourceMimeType>
     <destinationMimeType>image/svg+xml</destinationMimeType>
     <parameters>
-      <parameter name="CommandLineName">ifcConverter</parameter>
-      <parameter name="serviceUrl">http://ifc-converter:8080</parameter>
-      <parameter name="query">format=svg</parameter>
+      <parameter name="CommandLineName">ifc-to-svg</parameter>
     </parameters>
   </converter>
-
-  <converter name="ifc2objzip" class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
+  
+  <converter name="ifc-to-glb"
+             class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
+    <sourceMimeType>model/ifc</sourceMimeType>
+    <destinationMimeType>model/gltf-binary</destinationMimeType>
+    <parameters>
+      <parameter name="CommandLineName">ifc-to-glb</parameter>
+    </parameters>
+  </converter>
+  
+  <converter name="ifc-to-obj"
+             class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
+    <sourceMimeType>model/ifc</sourceMimeType>
+    <destinationMimeType>model/obj</destinationMimeType>
+    <parameters>
+      <parameter name="CommandLineName">ifc-to-obj</parameter>
+    </parameters>
+  </converter>
+  
+  <converter name="ifc-to-objzip"
+             class="org.nuxeo.ecm.platform.convert.plugins.CommandLineConverter">
     <sourceMimeType>model/ifc</sourceMimeType>
     <destinationMimeType>application/zip</destinationMimeType>
     <parameters>
-      <parameter name="CommandLineName">ifcConverter</parameter>
-      <parameter name="serviceUrl">http://ifc-converter:8080</parameter>
-      <parameter name="query">format=objzip</parameter>
+      <parameter name="CommandLineName">ifc-to-objzip</parameter>
     </parameters>
   </converter>
-
 </extension>
 ```
 
-#### 4. Call it from Automation
+### 4. Call it from Automation: `Blob.RunConverter`
+
+In all the examples, `ifcBlob` holds the .ifc file. (maybe a simple prior call to `ifcBlob = input["file:content"];`).
+
+* Converting to PNG
+
+`view` and `size` (64 to 4096) are required.
 
 ```js
-function run(input, params) {
-  var glb = Blob.RunConverter(input, {
-    'converter': 'ifc2glb',
-    'parameters': { 'targetFileName': 'model.glb' }
-  });
-  return glb;
-}
+var png3d = Blob.RunConverter(ifcBlob, {'converter': "ifc-to-png", 'parameters': 'view=3d\nsize=1024'});
+var pngPlan2048 = Blob.RunConverter(ifcBlob, {'converter': "ifc-to-png", 'parameters': 'view=plan\nsize=2048'});
 ```
 
-`targetFileName` is optional but recommended: it gives the result blob a readable name instead of a
-temporary one.
+* Converting to other formats
 
-> [!NOTE]
-> The converter parameters declared in the XML **win over** those passed at run time, so `query` cannot be
-> overridden from Automation. To choose the format or the size at run time, declare one converter without a
-> `query` parameter and pass the whole `query` (for example `format=png&view=3d&size=2048`) in the
-> `parameters` of `Blob.RunConverter`.
+For these, no need to pass parameters, the call ios very simple:
 
-Conversions are cached by Nuxeo on the blob plus the parameters: converting the same IFC twice with the same
-parameters runs `curl` only once.
+```js
+var svg = Blob.RunConverter(ifcBlob, {'converter': 'ifc-to-svg'});
+var glb = Blob.RunConverter(ifcBlob, {'converter': 'ifc-to-glb'});
+var obj = Blob.RunConverter(ifcBlob, {'converter': 'ifc-to-obj'});
+var zip = Blob.RunConverter(ifcBlob, {'converter': 'ifc-to-objzip'});
+```
 
-## Tune Your Docker-Compose
 
-* **Settings (environment variables)**
+## Tune your Docker-Compose
+
+### Settings (environment variables)
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -374,7 +378,7 @@ parameters runs `curl` only once.
 Each request is logged on one line: `convert format=png view=3d in=92542B status=200 time=0.65s`
 (`docker compose logs ifc-converter`).
 
-* **Content**
+### Content
 
 | File | Role |
 |---|---|
@@ -392,17 +396,11 @@ From the repository root (the `Dockerfile` is in the `ifc-converter` folder, hen
 
 ```bash
 docker build -t ifc-converter ./ifc-converter
-```
 
-```bash
 docker run --rm -d --name ifc-converter -p 127.0.0.1:18080:8080 ifc-converter
-```
 
-```bash
 curl -sf --data-binary @samples/Duplex_A_20110907.ifc "http://localhost:18080/convert?format=png" -o duplex.png
-```
 
-```bash
 docker stop ifc-converter
 ```
 
