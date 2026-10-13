@@ -11,11 +11,15 @@ own container next to Nuxeo, which calls it with `curl --data-binary @file.ifc`.
 
 | File | Role |
 |---|---|
-| `Dockerfile` | Debian 13 image: IfcConvert (official IfcOpenShell zip), Mesa EGL, `rsvg-convert`, Python venv, the service |
-| `app.py` | FastAPI service: streams the body to a temp dir, runs the tools as subprocesses, returns the file |
-| `render.py` | GLB/OBJ → PNG with PyVista/VTK, headless (EGL + Mesa llvmpipe), isometric view |
+| `ifc-converter/Dockerfile` | Debian 13 image: IfcConvert (official IfcOpenShell zip), Mesa EGL, `rsvg-convert`, Python venv, the service |
+| `ifc-converter/app.py` | FastAPI service: streams the body to a temp dir, runs the tools as subprocesses, returns the file |
+| `ifc-converter/render.py` | GLB/OBJ → PNG with PyVista/VTK, headless (EGL + Mesa llvmpipe), isometric view |
+| `ifc-converter/THIRD-PARTY-NOTICES.md` | Apache-2.0 for this code; licenses of everything the build downloads |
 | `samples/` | Public IFC files (CC BY 4.0), credited in `samples/README.md` |
-| `THIRD-PARTY-NOTICES.md` | Apache-2.0 for this code; licenses of everything the build downloads |
+
+The image sources live in `ifc-converter/`, which is also the Docker build context: the user copies that
+folder next to their `docker-compose.yml`. `samples/` and `README.md` stay at the repository root and are
+not part of the image.
 
 ## Hard rules
 
@@ -69,11 +73,12 @@ own container next to Nuxeo, which calls it with `curl --data-binary @file.ifc`.
 There is no automated test suite: this procedure is the test. Build only after the user agreed, and use the
 image tag the user gives you (`ifc-converter` below is an example).
 
-Build, from the repository root (on Apple silicon, the amd64 build is emulated and about 3× slower):
+Build, from the repository root — the build context is `ifc-converter/`, not the root (on Apple silicon, the
+amd64 build is emulated and about 3× slower):
 
 ```bash
-docker build -t <image> .
-docker build --platform linux/amd64 -t <image-for-amd64> .
+docker build -t <image> ./ifc-converter
+docker build --platform linux/amd64 -t <image-for-amd64> ./ifc-converter
 ```
 
 Run a temporary container, published on localhost only:
@@ -130,7 +135,8 @@ docker stop ifc-converter-check
 ## Upgrading
 
 Upgrades need a rebuild: ask the user first. After any upgrade, run the whole "Build, run, verify"
-procedure, then update `THIRD-PARTY-NOTICES.md` and the timings in `README.md` if they changed.
+procedure, then update `THIRD-PARTY-NOTICES.md` and, if they changed, the image size and the IfcConvert
+version shown in `README.md`.
 
 - **Debian (security fixes)**: rebuild with a fresh base image, `docker build --pull ...`. Debian 13 has full
   security support until August 2028, then LTS until June 2030; move to the next Debian release before that.
@@ -147,6 +153,10 @@ procedure, then update `THIRD-PARTY-NOTICES.md` and the timings in `README.md` i
 
 ## Out of scope
 
-- The Nuxeo side (converters, automation, UI) is configured in Nuxeo, not in this repository.
+- The Nuxeo side (mime types, command line, converters, automation, UI) is configured in Nuxeo, not in this
+  repository. `README.md` documents it as a ready-to-copy example; no Nuxeo code or bundle is built here.
+  Keep that example in sync with the service API when it changes: it relies on `CommandLineConverter`
+  (`#{sourceFilePath}` / `#{targetFilePath}`), on `curl -f` for error reporting, and on the timeout chain
+  `CONVERT_TIMEOUT_S` < `curl --max-time` < the command `<timeout>` < the transaction time to live.
 - Publishing images to a registry: distributing the image brings license obligations
   (see `THIRD-PARTY-NOTICES.md`). This repository only ships source.
